@@ -169,9 +169,12 @@ hypre_BoomerAMGCoarsenPMISDevice( hypre_ParCSRMatrix    *S,
                             (HYPRE_Int *) send_buf );
 #endif
 
-#if defined(HYPRE_WITH_GPU_AWARE_MPI) && defined(HYPRE_USING_THRUST_NOSYNC)
+#if defined(HYPRE_USING_THRUST_NOSYNC)
          /* RL: make sure send_buf is ready before issuing GPU-GPU MPI */
-         hypre_ForceSyncComputeStream(hypre_handle());
+         if (hypre_GetGpuAwareMPI())
+         {
+            hypre_ForceSyncComputeStream(hypre_handle());
+         }
 #endif
 
          comm_handle = hypre_ParCSRCommHandleCreate_v2(11, comm_pkg,
@@ -254,10 +257,11 @@ hypre_GetGlobalMeasureDevice( hypre_ParCSRMatrix  *S,
    /* compute local column nnz of the offd part */
    hypre_CSRMatrixColNNzRealDevice(S_offd, measure_offd);
 
-#if defined(HYPRE_WITH_GPU_AWARE_MPI)
-   /* RL: make sure measure_offd is ready before issuing GPU-GPU MPI */
-   hypre_ForceSyncComputeStream(hypre_handle());
-#endif
+   if (hypre_GetGpuAwareMPI())
+   {
+      /* RL: make sure measure_offd is ready before issuing GPU-GPU MPI */
+      hypre_ForceSyncComputeStream(hypre_handle());
+   }
 
    /* send local column nnz of the offd part to neighbors */
    comm_handle = hypre_ParCSRCommHandleCreate_v2(2, comm_pkg, HYPRE_MEMORY_DEVICE, measure_offd,
@@ -308,8 +312,32 @@ hypreGPUKernel_PMISCoarseningInit(hypre_DeviceItem &item,
 
    if (CF_init == 1)
    {
-      // TODO
-      hypre_device_assert(0);
+      CF_marker_i = read_only_load(&CF_marker_diag[i]);
+
+      if (CF_marker_i != SF_PT)
+      {
+         if (read_only_load(&S_offd_i[i + 1]) - read_only_load(&S_offd_i[i]) > 0 ||
+             CF_marker_i == F_PT)
+         {
+            CF_marker_i = 0;
+         }
+         if (CF_marker_i == Z_PT)
+         {
+            if (measure_diag[i] > 1.0 ||
+                read_only_load(&S_diag_i[i + 1]) - read_only_load(&S_diag_i[i]))
+            {
+               CF_marker_i = 0;
+            }
+            else
+            {
+               CF_marker_i = SF_PT;
+            }
+         }
+      }
+      else
+      {
+         measure_diag[i] = 0.0;
+      }
    }
    else
    {
@@ -381,9 +409,12 @@ hypre_PMISCoarseningInitDevice( hypre_ParCSRMatrix  *S,               /* in */
                      real_send_buf);
 #endif
 
-#if defined(HYPRE_WITH_GPU_AWARE_MPI) && defined(HYPRE_USING_THRUST_NOSYNC)
+#if defined(HYPRE_USING_THRUST_NOSYNC)
    /* RL: make sure real_send_buf is ready before issuing GPU-GPU MPI */
-   hypre_ForceSyncComputeStream(hypre_handle());
+   if (hypre_GetGpuAwareMPI())
+   {
+      hypre_ForceSyncComputeStream(hypre_handle());
+   }
 #endif
 
    comm_handle = hypre_ParCSRCommHandleCreate_v2(1, comm_pkg,
@@ -576,9 +607,12 @@ hypre_PMISCoarseningUpdateCFDevice( hypre_ParCSRMatrix  *S,               /* in 
                      real_send_buf);
 #endif
 
-#if defined(HYPRE_WITH_GPU_AWARE_MPI) && defined(HYPRE_USING_THRUST_NOSYNC)
+#if defined(HYPRE_USING_THRUST_NOSYNC)
    /* RL: make sure real_send_buf is ready before issuing GPU-GPU MPI */
-   hypre_ForceSyncComputeStream(hypre_handle());
+   if (hypre_GetGpuAwareMPI())
+   {
+      hypre_ForceSyncComputeStream(hypre_handle());
+   }
 #endif
 
    comm_handle = hypre_ParCSRCommHandleCreate_v2(1, comm_pkg,
@@ -597,9 +631,12 @@ hypre_PMISCoarseningUpdateCFDevice( hypre_ParCSRMatrix  *S,               /* in 
                      CF_marker_diag,
                      int_send_buf);
 
-#if defined(HYPRE_WITH_GPU_AWARE_MPI) && defined(HYPRE_USING_THRUST_NOSYNC)
+#if defined(HYPRE_USING_THRUST_NOSYNC)
    /* RL: make sure int_send_buf is ready before issuing GPU-GPU MPI */
-   hypre_ForceSyncComputeStream(hypre_handle());
+   if (hypre_GetGpuAwareMPI())
+   {
+      hypre_ForceSyncComputeStream(hypre_handle());
+   }
 #endif
 
    comm_handle = hypre_ParCSRCommHandleCreate_v2(11, comm_pkg,
@@ -613,4 +650,3 @@ hypre_PMISCoarseningUpdateCFDevice( hypre_ParCSRMatrix  *S,               /* in 
 }
 
 #endif // #if defined(HYPRE_USING_GPU)
-

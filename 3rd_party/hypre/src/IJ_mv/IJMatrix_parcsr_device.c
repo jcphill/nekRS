@@ -214,9 +214,9 @@ hypre_IJMatrixSetAddValuesParCSRDevice( hypre_IJMatrix       *matrix,
    return hypre_error_flag;
 }
 
-#if defined(HYPRE_USING_SYCL)
 template<typename T1, typename T2>
 struct hypre_IJMatrixAssembleFunctor
+#if defined(HYPRE_USING_SYCL)
 {
    typedef std::tuple<T1, T2> Tuple;
 
@@ -227,9 +227,6 @@ struct hypre_IJMatrixAssembleFunctor
    }
 };
 #else
-template<typename T1, typename T2>
-struct hypre_IJMatrixAssembleFunctor : public
-   thrust::binary_function< thrust::tuple<T1, T2>, thrust::tuple<T1, T2>, thrust::tuple<T1, T2> >
 {
    typedef thrust::tuple<T1, T2> Tuple;
 
@@ -315,15 +312,16 @@ hypre_IJMatrixAssembleSortAndReduce1(HYPRE_Int  N0, HYPRE_BigInt  *I0, HYPRE_Big
 
    *N1 = std::get<0>(new_end.first.base()) - I;
 #else
-   HYPRE_THRUST_CALL(
-      exclusive_scan_by_key,
-      make_reverse_iterator(thrust::make_zip_iterator(thrust::make_tuple(I0 + N0, J0 + N0))),
-      make_reverse_iterator(thrust::make_zip_iterator(thrust::make_tuple(I0,    J0))),
-      make_reverse_iterator(thrust::device_pointer_cast<char>(X0) + N0),
-      make_reverse_iterator(thrust::device_pointer_cast<char>(X) + N0),
-      char(0),
-      thrust::equal_to< thrust::tuple<HYPRE_BigInt, HYPRE_BigInt> >(),
-      thrust::maximum<char>() );
+  HYPRE_THRUST_CALL(
+    exclusive_scan_by_key,
+    thrust::make_reverse_iterator(thrust::make_zip_iterator(thrust::make_tuple(I0 + N0, J0 + N0))),
+    thrust::make_reverse_iterator(thrust::make_zip_iterator(thrust::make_tuple(I0,    J0))),
+    thrust::make_reverse_iterator(thrust::device_pointer_cast<char>(X0) + N0),
+    thrust::make_reverse_iterator(thrust::device_pointer_cast<char>(X) + N0),
+    char(0),
+    thrust::equal_to<thrust::tuple<HYPRE_BigInt, HYPRE_BigInt>>(),
+    thrust::maximum<char>()
+  );
 
    HYPRE_THRUST_CALL(replace_if, A0, A0 + N0, X, thrust::identity<char>(), 0.0);
 
@@ -347,9 +345,9 @@ hypre_IJMatrixAssembleSortAndReduce1(HYPRE_Int  N0, HYPRE_BigInt  *I0, HYPRE_Big
    return hypre_error_flag;
 }
 
-#if defined(HYPRE_USING_SYCL)
 template<typename T1, typename T2>
 struct hypre_IJMatrixAssembleFunctor2
+#if defined(HYPRE_USING_SYCL)
 {
    typedef std::tuple<T1, T2> Tuple;
 
@@ -364,9 +362,6 @@ struct hypre_IJMatrixAssembleFunctor2
    }
 };
 #else
-template<typename T1, typename T2>
-struct hypre_IJMatrixAssembleFunctor2 : public
-   thrust::binary_function< thrust::tuple<T1, T2>, thrust::tuple<T1, T2>, thrust::tuple<T1, T2> >
 {
    typedef thrust::tuple<T1, T2> Tuple;
 
@@ -484,13 +479,14 @@ hypre_IJMatrixAssembleSortAndReduce3(HYPRE_Int  N0, HYPRE_BigInt  *I0, HYPRE_Big
 #else
    /* output in X0: 0: keep, 1: zero-out */
    HYPRE_THRUST_CALL(
-      inclusive_scan_by_key,
-      make_reverse_iterator(thrust::make_zip_iterator(thrust::make_tuple(I0 + N0, J0 + N0))),
-      make_reverse_iterator(thrust::make_zip_iterator(thrust::make_tuple(I0,    J0))),
-      make_reverse_iterator(thrust::device_pointer_cast<char>(X0) + N0),
-      make_reverse_iterator(thrust::device_pointer_cast<char>(X0) + N0),
-      thrust::equal_to< thrust::tuple<HYPRE_BigInt, HYPRE_BigInt> >(),
-      thrust::maximum<char>() );
+     inclusive_scan_by_key,
+     thrust::make_reverse_iterator(thrust::make_zip_iterator(thrust::make_tuple(I0 + N0, J0 + N0))),
+     thrust::make_reverse_iterator(thrust::make_zip_iterator(thrust::make_tuple(I0,    J0))),
+     thrust::make_reverse_iterator(thrust::device_pointer_cast<char>(X0) + N0),
+     thrust::make_reverse_iterator(thrust::device_pointer_cast<char>(X0) + N0),
+     thrust::equal_to<thrust::tuple<HYPRE_BigInt, HYPRE_BigInt>>(),
+     thrust::maximum<char>()
+   );
 
    HYPRE_THRUST_CALL(replace_if, A0, A0 + N0, X0, thrust::identity<char>(), 0.0);
 
@@ -579,6 +575,7 @@ hypre_IJMatrixAssembleParCSRDevice(hypre_IJMatrix *matrix)
    HYPRE_BigInt row_end   = row_partitioning[1];
    HYPRE_BigInt col_start = col_partitioning[0];
    HYPRE_BigInt col_end   = col_partitioning[1];
+   HYPRE_BigInt col_first = hypre_IJMatrixGlobalFirstCol(matrix);
    HYPRE_Int nrows = row_end - row_start;
    HYPRE_Int ncols = col_end - col_start;
 
@@ -630,7 +627,6 @@ hypre_IJMatrixAssembleParCSRDevice(hypre_IJMatrix *matrix)
 
 #if defined(HYPRE_USING_SYCL)
          HYPRE_ONEDPL_CALL(std::transform, stack_i, stack_i + nelms, is_on_proc, pred);
-         /* WM: HERE */
          auto zip_in = oneapi::dpl::make_zip_iterator(stack_i, stack_j, stack_data, stack_sora);
          auto zip_out = oneapi::dpl::make_zip_iterator(off_proc_i, off_proc_j, off_proc_data, off_proc_sora);
          auto new_end1 = hypreSycl_copy_if( zip_in,         /* first */
@@ -744,6 +740,24 @@ hypre_IJMatrixAssembleParCSRDevice(hypre_IJMatrix *matrix)
                          _1 - row_start );
 #endif
 
+      /* adjust col indices wrt the global first index */
+      if (col_first)
+      {
+#if defined(HYPRE_USING_SYCL)
+         HYPRE_ONEDPL_CALL( std::transform,
+                            new_j,
+                            new_j + new_nnz,
+                            new_j,
+         [col_first = col_first] (const auto & x) {return x - col_first;} );
+#else
+         HYPRE_THRUST_CALL( transform,
+                            new_j,
+                            new_j + new_nnz,
+                            new_j,
+                            _1 - col_first );
+#endif
+      }
+
       hypre_TFree(new_i, HYPRE_MEMORY_DEVICE);
 
       HYPRE_Int      num_cols_offd_new;
@@ -770,9 +784,9 @@ hypre_IJMatrixAssembleParCSRDevice(hypre_IJMatrix *matrix)
                                        new_j,
                                        NULL,
                                        NULL,
-                                       col_start,
-                                       col_end - 1,
-                                       hypre_CSRMatrixNumCols(hypre_ParCSRMatrixOffd(par_matrix)),
+                                       col_start - col_first,
+                                       col_end - col_first - 1,
+                                       -1,
                                        NULL,
                                        NULL,
                                        NULL,
@@ -818,8 +832,8 @@ hypre_IJMatrixAssembleParCSRDevice(hypre_IJMatrix *matrix)
                                        new_j,
                                        new_data,
                                        diag_nnz_existed || offd_nnz_existed ? new_sora : NULL,
-                                       col_start,
-                                       col_end - 1,
+                                       col_start - col_first,
+                                       col_end - col_first - 1,
                                        hypre_CSRMatrixNumCols(hypre_ParCSRMatrixOffd(par_matrix)),
                                        hypre_ParCSRMatrixDeviceColMapOffd(par_matrix),
                                        &col_map_offd_map,

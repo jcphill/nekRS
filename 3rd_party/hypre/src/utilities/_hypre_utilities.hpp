@@ -16,6 +16,149 @@ extern "C++" {
  * SPDX-License-Identifier: (Apache-2.0 OR MIT)
  ******************************************************************************/
 
+#ifndef HYPRE_FUNCTORS_H
+#define HYPRE_FUNCTORS_H
+
+#if defined(HYPRE_USING_CUDA) || defined(HYPRE_USING_HIP)
+
+/*--------------------------------------------------------------------------
+ * hypreFunctor_DenseMatrixIdentity
+ *
+ * Functor for generating a dense identity matrix.
+ * This assumes that the input array "a" is zeros everywhere
+ *--------------------------------------------------------------------------*/
+
+struct hypreFunctor_DenseMatrixIdentity
+{
+   HYPRE_Int   n_;
+   HYPRE_Real *a_;
+
+   hypreFunctor_DenseMatrixIdentity(HYPRE_Int n, HYPRE_Real *a)
+   {
+      n_ = n;
+      a_ = a;
+   }
+
+   __host__ __device__ void operator()(HYPRE_Int i)
+   {
+      a_[i * n_ + i] = 1.0;
+   }
+};
+
+/*--------------------------------------------------------------------------
+ * hypreFunctor_ArrayStridedAccess
+ *
+ * Functor for performing strided data access on a templated array.
+ *
+ * The stride interval "s_" is used to access every "s_"-th element
+ * from the source array "a_".
+ *
+ * It is templated to support various data types for the array.
+ *--------------------------------------------------------------------------*/
+
+template <typename T>
+struct hypreFunctor_ArrayStridedAccess
+{
+   HYPRE_Int  s_;
+   T         *a_;
+
+   hypreFunctor_ArrayStridedAccess(HYPRE_Int s, T *a) : s_(s), a_(a) {}
+
+   __host__ __device__ T operator()(HYPRE_Int i)
+   {
+      return a_[i * s_];
+   }
+};
+
+/*--------------------------------------------------------------------------
+ * hypreFunctor_IndexStrided
+ *
+ * This functor multiplies a given index "i" by a specified stride "s_".
+ *
+ * It is templated to support various data types for the index and stride.
+ *--------------------------------------------------------------------------*/
+
+template <typename T>
+struct hypreFunctor_IndexStrided
+{
+   T s_;
+
+   hypreFunctor_IndexStrided(T s) : s_(s) {}
+
+   __host__ __device__ T operator()(const T i) const
+   {
+      return i * s_;
+   }
+};
+
+/*--------------------------------------------------------------------------
+ * hypreFunctor_IndexCycle
+ *--------------------------------------------------------------------------*/
+
+struct hypreFunctor_IndexCycle
+{
+   HYPRE_Int cycle_length;
+
+   hypreFunctor_IndexCycle(HYPRE_Int _cycle_length) : cycle_length(_cycle_length) {}
+
+   __host__ __device__ HYPRE_Int operator()(HYPRE_Int i) const
+   {
+      return i % cycle_length;
+   }
+};
+
+#endif /* if defined(HYPRE_USING_CUDA) || defined(HYPRE_USING_HIP) */
+#endif /* ifndef HYPRE_FUNCTORS_H */
+/******************************************************************************
+ * Copyright (c) 1998 Lawrence Livermore National Security, LLC and other
+ * HYPRE Project Developers. See the top-level COPYRIGHT file for details.
+ *
+ * SPDX-License-Identifier: (Apache-2.0 OR MIT)
+ ******************************************************************************/
+
+#ifndef HYPRE_PREDICATES_H
+#define HYPRE_PREDICATES_H
+
+/******************************************************************************
+ *
+ * Header file defining predicates for thrust used throughout hypre
+ *
+ *****************************************************************************/
+
+#if defined(HYPRE_USING_CUDA) || defined(HYPRE_USING_HIP)
+
+/*--------------------------------------------------------------------------
+ * hyprePred_StridedAccess
+ *
+ * This struct defines a predicate for strided access in array-like data.
+ *
+ * It is used to determine if an element at a given index should be processed
+ * or not, based on a specified stride. The operator() returns true when the
+ * index is a multiple of the stride, indicating the element at that index
+ * is part of the strided subset.
+ *--------------------------------------------------------------------------*/
+
+struct hyprePred_StridedAccess
+{
+   HYPRE_Int  s_;
+
+   hyprePred_StridedAccess(HYPRE_Int s) : s_(s) {}
+
+   __host__ __device__ HYPRE_Int operator()(const HYPRE_Int i) const
+   {
+      return (!(i % s_));
+   }
+};
+
+#endif /* if defined(HYPRE_USING_CUDA) || defined(HYPRE_USING_HIP) */
+#endif /* ifndef HYPRE_PREDICATES_H */
+/******************************************************************************
+ * Copyright (c) 1998 Lawrence Livermore National Security, LLC and other
+ * HYPRE Project Developers. See the top-level COPYRIGHT file for details.
+ *
+ * SPDX-License-Identifier: (Apache-2.0 OR MIT)
+ ******************************************************************************/
+
 #ifndef DEVICE_ALLOCATOR_H
 #define DEVICE_ALLOCATOR_H
 
@@ -65,9 +208,11 @@ struct hypre_device_allocator
 /* Data types depending on GPU architecture */
 #if defined(HYPRE_USING_CUDA) || defined(HYPRE_USING_SYCL)
 typedef hypre_uint          hypre_mask;
+#define hypre_mask_one      1U
 
 #elif defined(HYPRE_USING_HIP)
 typedef hypre_ulonglongint  hypre_mask;
+#define hypre_mask_one      1ULL
 
 #endif
 
@@ -179,6 +324,9 @@ using hypre_DeviceItem = void*;
 
 #if defined(HYPRE_USING_ROCSPARSE)
 #include <rocsparse/rocsparse.h>
+#if !defined(ROCSPARSE_VERSION)
+#define ROCSPARSE_VERSION (ROCSPARSE_VERSION_MAJOR * 100000 + ROCSPARSE_VERSION_MINOR * 100 + ROCSPARSE_VERSION_PATCH)
+#endif
 #endif
 
 #if defined(HYPRE_USING_ROCSOLVER)
@@ -410,7 +558,6 @@ using hypre_DeviceItem = sycl::nd_item<3>;
    if (cudaSuccess != err) {                                                                 \
       printf("CUDA ERROR (code = %d, %s) at %s:%d\n", err, cudaGetErrorString(err),          \
                    __FILE__, __LINE__);                                                      \
-      hypre_assert(0); exit(1);                                                              \
    } } while(0)
 
 #elif defined(HYPRE_USING_HIP)
@@ -419,7 +566,7 @@ using hypre_DeviceItem = sycl::nd_item<3>;
    if (hipSuccess != err) {                                                                  \
       printf("HIP ERROR (code = %d, %s) at %s:%d\n", err, hipGetErrorString(err),            \
                    __FILE__, __LINE__);                                                      \
-      hypre_assert(0); exit(1);                                                              \
+      hypre_assert(0);                                                                       \
    } } while(0)
 
 #elif defined(HYPRE_USING_SYCL)
@@ -432,13 +579,13 @@ using hypre_DeviceItem = sycl::nd_item<3>;
    {                                                                                         \
       hypre_printf("SYCL ERROR (code = %s) at %s:%d\n", ex.what(),                           \
                      __FILE__, __LINE__);                                                    \
-      assert(0); exit(1);                                                                    \
+      assert(0);                                                                             \
    }                                                                                         \
    catch(std::runtime_error const& ex)                                                       \
    {                                                                                         \
       hypre_printf("STD ERROR (code = %s) at %s:%d\n", ex.what(),                            \
                    __FILE__, __LINE__);                                                      \
-      assert(0); exit(1);                                                                    \
+      assert(0);                                                                             \
    }
 #endif
 
@@ -450,10 +597,12 @@ using hypre_DeviceItem = sycl::nd_item<3>;
 #error "GPU build does not support complex numbers!"
 
 #elif defined(HYPRE_SINGLE) /* Single */
+#if defined(HYPRE_USING_CUDA)
 /* cuBLAS */
 #define hypre_cublas_scal                      cublasSscal
 #define hypre_cublas_axpy                      cublasSaxpy
 #define hypre_cublas_dot                       cublasSdot
+#define hypre_cublas_gemv                      cublasSgemv
 #define hypre_cublas_getrfBatched              cublasSgetrfBatched
 #define hypre_cublas_getriBatched              cublasSgetriBatched
 
@@ -473,6 +622,12 @@ using hypre_DeviceItem = sycl::nd_item<3>;
 #define hypre_cusparse_csrsm2_analysis         cusparseScsrsm2_analysis
 #define hypre_cusparse_csrsm2_solve            cusparseScsrsm2_solve
 
+/* cuSOLVER */
+#define hypre_cusolver_dngetrf                 cusolverDnSgetrf
+#define hypre_cusolver_dngetrf_bs              cusolverDnSgetrf_bufferSize
+#define hypre_cusolver_dngetrs                 cusolverDnSgetrs
+
+#elif defined(HYPRE_USING_HIP)
 /* rocSPARSE */
 #define hypre_rocsparse_csrsv_buffer_size      rocsparse_scsrsv_buffer_size
 #define hypre_rocsparse_csrsv_analysis         rocsparse_scsrsv_analysis
@@ -486,15 +641,27 @@ using hypre_DeviceItem = sycl::nd_item<3>;
 #define hypre_rocsparse_csrilu0_buffer_size    rocsparse_scsrilu0_buffer_size
 #define hypre_rocsparse_csrilu0_analysis       rocsparse_scsrilu0_analysis
 #define hypre_rocsparse_csrilu0                rocsparse_scsrilu0
+#define hypre_rocsparse_csritilu0_compute      rocsparse_scsritilu0_compute
+#define hypre_rocsparse_csritilu0_history      rocsparse_scsritilu0_history
+
+/* rocSOLVER */
+
+/**************
+ * TODO (VPM) *
+ **************/
+
+#endif /* if defined(HYPRE_USING_CUDA) || defined(HYPRE_USING_HIP) */
 
 #elif defined(HYPRE_LONG_DOUBLE) /* Long Double */
 #error "GPU build does not support Long Double numbers!"
 
 #else /* Double */
+#if defined(HYPRE_USING_CUDA)
 /* cuBLAS */
 #define hypre_cublas_scal                      cublasDscal
 #define hypre_cublas_axpy                      cublasDaxpy
 #define hypre_cublas_dot                       cublasDdot
+#define hypre_cublas_gemv                      cublasDgemv
 #define hypre_cublas_getrfBatched              cublasDgetrfBatched
 #define hypre_cublas_getriBatched              cublasDgetriBatched
 
@@ -514,6 +681,12 @@ using hypre_DeviceItem = sycl::nd_item<3>;
 #define hypre_cusparse_csrsm2_analysis         cusparseDcsrsm2_analysis
 #define hypre_cusparse_csrsm2_solve            cusparseDcsrsm2_solve
 
+/* cuSOLVER */
+#define hypre_cusolver_dngetrf                 cusolverDnDgetrf
+#define hypre_cusolver_dngetrf_bs              cusolverDnDgetrf_bufferSize
+#define hypre_cusolver_dngetrs                 cusolverDnDgetrs
+
+#elif defined(HYPRE_USING_HIP)
 /* rocSPARSE */
 #define hypre_rocsparse_csrsv_buffer_size      rocsparse_dcsrsv_buffer_size
 #define hypre_rocsparse_csrsv_analysis         rocsparse_dcsrsv_analysis
@@ -527,7 +700,17 @@ using hypre_DeviceItem = sycl::nd_item<3>;
 #define hypre_rocsparse_csrilu0_buffer_size    rocsparse_dcsrilu0_buffer_size
 #define hypre_rocsparse_csrilu0_analysis       rocsparse_dcsrilu0_analysis
 #define hypre_rocsparse_csrilu0                rocsparse_dcsrilu0
-#endif
+#define hypre_rocsparse_csritilu0_compute      rocsparse_dcsritilu0_compute
+#define hypre_rocsparse_csritilu0_history      rocsparse_dcsritilu0_history
+
+/* rocSOLVER */
+
+/**************
+ * TODO (VPM) *
+ **************/
+
+#endif /* #if defined(HYPRE_USING_CUDA) || defined(HYPRE_USING_HIP)*/
+#endif /* #if defined(HYPRE_COMPLEX) || defined(HYPRE_SINGLE) || defined(HYPRE_LONG_DOUBLE) */
 
 #define HYPRE_CUBLAS_CALL(call) do {                                                         \
    cublasStatus_t err = call;                                                                \
@@ -576,7 +759,7 @@ using hypre_DeviceItem = sycl::nd_item<3>;
    if (CUSOLVER_STATUS_SUCCESS != err) {                                                     \
       printf("cuSOLVER ERROR (code = %d) at %s:%d\n",                                        \
             err, __FILE__, __LINE__);                                                        \
-      hypre_assert(0); exit(1);                                                              \
+      hypre_assert(0);                                                                       \
    } } while(0)
 
 #define HYPRE_ROCSOLVER_CALL(call) do {                                                      \
@@ -584,7 +767,6 @@ using hypre_DeviceItem = sycl::nd_item<3>;
    if (rocblas_status_success != err) {                                                      \
       printf("rocSOLVER ERROR (code = %d, %s) at %s:%d\n",                                   \
              err, rocblas_status_to_string(err), __FILE__, __LINE__);                        \
-      assert(0); exit(1);                                                                    \
    } } while(0)
 
 #define HYPRE_CURAND_CALL(call) do {                                                         \
@@ -626,6 +808,7 @@ using hypre_DeviceItem = sycl::nd_item<3>;
 #elif defined(HYPRE_USING_HIP)
 #define HYPRE_THRUST_CALL(func_name, ...) \
    thrust::func_name(thrust::hip::par(hypre_HandleDeviceAllocator(hypre_handle())).on(hypre_HandleComputeStream(hypre_handle())), __VA_ARGS__);
+
 #elif defined(HYPRE_USING_SYCL)
 #define HYPRE_ONEDPL_CALL(func_name, ...)                                                    \
   func_name(oneapi::dpl::execution::make_device_policy(                                      \
@@ -700,7 +883,7 @@ struct hypre_DeviceData
 #else
    HYPRE_Int                         device;
 #endif
-   hypre_int                         device_max_shmem_per_block[2];
+   hypre_int                         device_max_shmem_per_block[3];
    /* by default, hypre puts GPU computations in this stream
     * Do not be confused with the default (null) stream */
    HYPRE_Int                         compute_stream_num;
@@ -736,6 +919,7 @@ struct hypre_DeviceData
 #define hypre_DeviceDataDevice(data)                         ((data) -> device)
 #define hypre_DeviceDataDeviceMaxWorkGroupSize(data)         ((data) -> device_max_work_group_size)
 #define hypre_DeviceDataDeviceMaxShmemPerBlock(data)         ((data) -> device_max_shmem_per_block)
+#define hypre_DeviceDataDeviceMaxShmemPerBlockInited(data)  (((data) -> device_max_shmem_per_block)[2])
 #define hypre_DeviceDataComputeStreamNum(data)               ((data) -> compute_stream_num)
 #define hypre_DeviceDataReduceBuffer(data)                   ((data) -> reduce_buffer)
 #define hypre_DeviceDataSpgemmUseVendor(data)                ((data) -> spgemm_use_vendor)
@@ -779,6 +963,7 @@ rocsparse_handle      hypre_DeviceDataCusparseHandle(hypre_DeviceData *data);
 vendorSolverHandle_t  hypre_DeviceDataVendorSolverHandle(hypre_DeviceData *data);
 #endif
 
+/* TODO (VPM): Create a deviceStream_t to encapsulate all stream types below */
 #if defined(HYPRE_USING_CUDA)
 cudaStream_t          hypre_DeviceDataStream(hypre_DeviceData *data, HYPRE_Int i);
 cudaStream_t          hypre_DeviceDataComputeStream(hypre_DeviceData *data);
@@ -798,19 +983,11 @@ struct hypre_CsrsvData
    hypre_cusparseSpSVDescr   info_U;
    cusparseSolvePolicy_t     analysis_policy;
    cusparseSolvePolicy_t     solve_policy;
-
 #elif defined(HYPRE_USING_ROCSPARSE)
    rocsparse_mat_info        info_L;
    rocsparse_mat_info        info_U;
    rocsparse_analysis_policy analysis_policy;
    rocsparse_solve_policy    solve_policy;
-
-#elif defined(HYPRE_USING_ONEMKLSPARSE)
-   /* WM: todo - placeholders */
-   char                      info_L;
-   char                      info_U;
-   char                      analysis_policy;
-   char                      solve_policy;
 #endif
 
 #if defined(HYPRE_USING_CUSPARSE) && (CUSPARSE_VERSION >= CUSPARSE_SPSV_VERSION)
@@ -918,6 +1095,53 @@ hypre_int next_power_of_2(hypre_int n)
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #if defined(HYPRE_USING_CUDA) || defined(HYPRE_USING_HIP)
+
+#if CUDA_VERSION >= 13000
+
+// adding removed methods to support newer CUDA versions
+namespace thrust
+{
+
+template <typename T>
+struct identity
+{
+    __host__ __device__ identity() {}
+
+    __host__ __device__
+    T operator()(const T &x) const
+    {
+        return x;
+    }
+};
+
+template <typename F>
+struct not1
+{
+    F f;
+
+    __host__ __device__
+    not1(F f_) : f(f_) {}
+
+    template <typename T>
+    __host__ __device__
+    bool operator()(const T &x) const
+    {
+        return !f(x);
+    }
+};
+
+template <typename T>
+using not_identity = not1<identity<T>>;
+
+template <typename T>
+__host__ __device__ inline not_identity<T> not_identity_fun()
+{
+    return not_identity<T>(identity<T>());
+}
+
+} // namespace thrust
+
+#endif
 
 /* return the number of threads in block */
 template <hypre_int dim>
@@ -1111,20 +1335,48 @@ void __syncwarp()
 
 #endif // #if defined(HYPRE_USING_HIP) || (CUDA_VERSION < 9000)
 
-
-// __any and __ballot were technically deprecated in CUDA 7 so we don't bother
-// with these overloads for CUDA, just for HIP.
-#if defined(HYPRE_USING_HIP)
 static __device__ __forceinline__
-hypre_int __any_sync(hypre_mask mask, hypre_int predicate)
+hypre_mask hypre_ballot_sync(hypre_mask mask, hypre_int predicate)
 {
-   return __any(predicate);
+#if defined(HYPRE_USING_CUDA)
+   return __ballot_sync(mask, predicate);
+#else
+   return __ballot(predicate);
+#endif
 }
 
 static __device__ __forceinline__
-hypre_int __ballot_sync(hypre_mask mask, hypre_int predicate)
+HYPRE_Int hypre_popc(hypre_mask mask)
 {
-   return __ballot(predicate);
+#if defined(HYPRE_USING_CUDA)
+   return (HYPRE_Int) __popc(mask);
+#else
+   return (HYPRE_Int) __popcll(mask);
+#endif
+}
+
+static __device__ __forceinline__
+HYPRE_Int hypre_ffs(hypre_mask mask)
+{
+#if defined(HYPRE_USING_CUDA)
+   return (HYPRE_Int) __ffs(mask);
+#else
+   return (HYPRE_Int) __ffsll(mask);
+#endif
+}
+
+/* Flip n-th bit of bitmask (0 becomes 1. 1 becomes 0) */
+static __device__ __forceinline__
+hypre_mask hypre_mask_flip_at(hypre_mask bitmask, hypre_int n)
+{
+   return bitmask ^ (hypre_mask_one << n);
+}
+
+#if defined(HYPRE_USING_HIP)
+static __device__ __forceinline__
+hypre_int __any_sync(unsigned mask, hypre_int predicate)
+{
+   return __any(predicate);
 }
 #endif
 
@@ -1165,7 +1417,7 @@ T warp_prefix_sum(hypre_DeviceItem &item, hypre_int lane_id, T in, T &all_sum)
    }
 
 #pragma unroll
-   for (hypre_int d = HYPRE_WARP_SIZE / 2; d > 0; d >>= 1)
+   for (hypre_int d = HYPRE_WARP_SIZE >> 1; d > 0; d >>= 1)
    {
       T t = __shfl_xor_sync(HYPRE_WARP_FULL_MASK, in, d);
 
@@ -1227,7 +1479,7 @@ static __device__ __forceinline__
 T warp_reduce_sum(hypre_DeviceItem &item, T in)
 {
 #pragma unroll
-   for (hypre_int d = HYPRE_WARP_SIZE / 2; d > 0; d >>= 1)
+   for (hypre_int d = HYPRE_WARP_SIZE >> 1; d > 0; d >>= 1)
    {
       in += __shfl_down_sync(HYPRE_WARP_FULL_MASK, in, d);
    }
@@ -1239,7 +1491,7 @@ static __device__ __forceinline__
 T warp_allreduce_sum(hypre_DeviceItem &item, T in)
 {
 #pragma unroll
-   for (hypre_int d = HYPRE_WARP_SIZE / 2; d > 0; d >>= 1)
+   for (hypre_int d = HYPRE_WARP_SIZE >> 1; d > 0; d >>= 1)
    {
       in += __shfl_xor_sync(HYPRE_WARP_FULL_MASK, in, d);
    }
@@ -1251,7 +1503,7 @@ static __device__ __forceinline__
 T warp_reduce_max(hypre_DeviceItem &item, T in)
 {
 #pragma unroll
-   for (hypre_int d = HYPRE_WARP_SIZE / 2; d > 0; d >>= 1)
+   for (hypre_int d = HYPRE_WARP_SIZE >> 1; d > 0; d >>= 1)
    {
       in = max(in, __shfl_down_sync(HYPRE_WARP_FULL_MASK, in, d));
    }
@@ -1263,7 +1515,7 @@ static __device__ __forceinline__
 T warp_allreduce_max(hypre_DeviceItem &item, T in)
 {
 #pragma unroll
-   for (hypre_int d = HYPRE_WARP_SIZE / 2; d > 0; d >>= 1)
+   for (hypre_int d = HYPRE_WARP_SIZE >> 1; d > 0; d >>= 1)
    {
       in = max(in, __shfl_xor_sync(HYPRE_WARP_FULL_MASK, in, d));
    }
@@ -1275,7 +1527,7 @@ static __device__ __forceinline__
 T warp_reduce_min(hypre_DeviceItem &item, T in)
 {
 #pragma unroll
-   for (hypre_int d = HYPRE_WARP_SIZE / 2; d > 0; d >>= 1)
+   for (hypre_int d = HYPRE_WARP_SIZE >> 1; d > 0; d >>= 1)
    {
       in = min(in, __shfl_down_sync(HYPRE_WARP_FULL_MASK, in, d));
    }
@@ -1287,7 +1539,7 @@ static __device__ __forceinline__
 T warp_allreduce_min(hypre_DeviceItem &item, T in)
 {
 #pragma unroll
-   for (hypre_int d = HYPRE_WARP_SIZE / 2; d > 0; d >>= 1)
+   for (hypre_int d = HYPRE_WARP_SIZE >> 1; d > 0; d >>= 1)
    {
       in = min(in, __shfl_xor_sync(HYPRE_WARP_FULL_MASK, in, d));
    }
@@ -1295,7 +1547,7 @@ T warp_allreduce_min(hypre_DeviceItem &item, T in)
 }
 
 template<typename T1, typename T2>
-struct type_cast : public thrust::unary_function<T1, T2>
+struct type_cast
 {
    __host__ __device__ T2 operator()(const T1 &x) const
    {
@@ -1304,7 +1556,7 @@ struct type_cast : public thrust::unary_function<T1, T2>
 };
 
 template<typename T>
-struct absolute_value : public thrust::unary_function<T, T>
+struct absolute_value
 {
    __host__ __device__ T operator()(const T &x) const
    {
@@ -1355,7 +1607,7 @@ struct TupleComp3
 };
 
 template<typename T>
-struct is_negative : public thrust::unary_function<T, bool>
+struct is_negative
 {
    __host__ __device__ bool operator()(const T &x)
    {
@@ -1364,7 +1616,7 @@ struct is_negative : public thrust::unary_function<T, bool>
 };
 
 template<typename T>
-struct is_positive : public thrust::unary_function<T, bool>
+struct is_positive
 {
    __host__ __device__ bool operator()(const T &x)
    {
@@ -1373,7 +1625,7 @@ struct is_positive : public thrust::unary_function<T, bool>
 };
 
 template<typename T>
-struct is_nonnegative : public thrust::unary_function<T, bool>
+struct is_nonnegative
 {
    __host__ __device__ bool operator()(const T &x)
    {
@@ -1382,8 +1634,25 @@ struct is_nonnegative : public thrust::unary_function<T, bool>
 };
 
 template<typename T>
-struct in_range : public thrust::unary_function<T, bool>
+struct in_range
+#if CUDA_VERSION >= 13000 
 {
+    T low, up;
+
+    __host__ __device__ in_range(T low_, T up_) : low(low_), up(up_) {}
+
+    template<typename U>
+    __host__ __device__ bool operator()(U x) const
+    {
+        T y = static_cast<T>(x); // convert to T
+        return (y >= low && y <= up);
+    }
+};
+#else
+{
+  using argument_type = T;
+  using result_type   = bool;
+
    T low, up;
 
    in_range(T low_, T up_) { low = low_; up = up_; }
@@ -1393,9 +1662,10 @@ struct in_range : public thrust::unary_function<T, bool>
       return (x >= low && x <= up);
    }
 };
+#endif
 
 template<typename T>
-struct out_of_range : public thrust::unary_function<T, bool>
+struct out_of_range
 {
    T low, up;
 
@@ -1408,20 +1678,23 @@ struct out_of_range : public thrust::unary_function<T, bool>
 };
 
 template<typename T>
-struct less_than : public thrust::unary_function<T, bool>
+struct less_than
 {
+  using argument_type = T;
+  using result_type   = bool;
+
    T val;
 
-   less_than(T val_) { val = val_; }
+   __host__ __device__ less_than(T val_) { val = val_; }
 
-   __host__ __device__ bool operator()(const T &x)
+   __host__ __device__ bool operator()(const T &x) const
    {
       return (x < val);
    }
 };
 
 template<typename T>
-struct modulo : public thrust::unary_function<T, T>
+struct modulo
 {
    T val;
 
@@ -1434,17 +1707,36 @@ struct modulo : public thrust::unary_function<T, T>
 };
 
 template<typename T>
-struct equal : public thrust::unary_function<T, bool>
+struct equal
+#if CUDA_VERSION >= 13000 
 {
    T val;
 
-   equal(T val_) { val = val_; }
+   __host__ __device__
+   equal(T val_) : val(val_) {}
+
+   template <typename U>
+   __host__ __device__
+   bool operator()(const U &x) const
+   {
+      return static_cast<T>(x) == val;
+   }
+};
+#else
+{
+   using argument_type = T;
+   using result_type   = bool;
+
+   T val; 
+
+   equal(T val_) { val = val_; } 
 
    __host__ __device__ bool operator()(const T &x)
    {
       return (x == val);
    }
 };
+#endif
 
 struct print_functor
 {
@@ -1589,7 +1881,7 @@ T warp_prefix_sum(hypre_DeviceItem &item, hypre_int lane_id, T in, T &all_sum)
    }
 
 #pragma unroll
-   for (hypre_int d = HYPRE_WARP_SIZE / 2; d > 0; d >>= 1)
+   for (hypre_int d = HYPRE_WARP_SIZE >> 1; d > 0; d >>= 1)
    {
       T t = sycl::permute_group_by_xor(item.get_sub_group(), in, d);
 
@@ -1693,7 +1985,7 @@ template <typename T>
 static __forceinline__
 T warp_reduce_sum(hypre_DeviceItem &item, T in)
 {
-   for (hypre_int d = HYPRE_WARP_SIZE / 2; d > 0; d >>= 1)
+   for (hypre_int d = HYPRE_WARP_SIZE >> 1; d > 0; d >>= 1)
    {
       in += sycl::shift_group_left(item.get_sub_group(), in, d);
    }
@@ -1704,7 +1996,7 @@ template <typename T>
 static __forceinline__
 T warp_allreduce_sum(hypre_DeviceItem &item, T in)
 {
-   for (hypre_int d = HYPRE_WARP_SIZE / 2; d > 0; d >>= 1)
+   for (hypre_int d = HYPRE_WARP_SIZE >> 1; d > 0; d >>= 1)
    {
       in += sycl::permute_group_by_xor(item.get_sub_group(), in, d);
    }
@@ -1715,7 +2007,7 @@ template <typename T>
 static __forceinline__
 T warp_reduce_max(hypre_DeviceItem &item, T in)
 {
-   for (hypre_int d = HYPRE_WARP_SIZE / 2; d > 0; d >>= 1)
+   for (hypre_int d = HYPRE_WARP_SIZE >> 1; d > 0; d >>= 1)
    {
       in = std::max(in, sycl::shift_group_left(item.get_sub_group(), in, d));
    }
@@ -1726,7 +2018,7 @@ template <typename T>
 static __forceinline__
 T warp_allreduce_max(hypre_DeviceItem &item, T in)
 {
-   for (hypre_int d = HYPRE_WARP_SIZE / 2; d > 0; d >>= 1)
+   for (hypre_int d = HYPRE_WARP_SIZE >> 1; d > 0; d >>= 1)
    {
       in = std::max(in, sycl::permute_group_by_xor(item.get_sub_group(), in, d));
    }
@@ -1737,7 +2029,7 @@ template <typename T>
 static __forceinline__
 T warp_reduce_min(hypre_DeviceItem &item, T in)
 {
-   for (hypre_int d = HYPRE_WARP_SIZE / 2; d > 0; d >>= 1)
+   for (hypre_int d = HYPRE_WARP_SIZE >> 1; d > 0; d >>= 1)
    {
       in = std::min(in, sycl::shift_group_left(item.get_sub_group(), in, d));
    }
@@ -1748,7 +2040,7 @@ template <typename T>
 static __forceinline__
 T warp_allreduce_min(hypre_DeviceItem &item, T in)
 {
-   for (hypre_int d = HYPRE_WARP_SIZE / 2; d > 0; d >>= 1)
+   for (hypre_int d = HYPRE_WARP_SIZE >> 1; d > 0; d >>= 1)
    {
       in = std::min(in, sycl::permute_group_by_xor(item.get_sub_group(), in, d));
    }

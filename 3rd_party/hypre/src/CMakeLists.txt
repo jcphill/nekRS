@@ -12,9 +12,9 @@ else ()
 endif ()
 
 # The version number.
-set(HYPRE_VERSION 2.29.0)
-set(HYPRE_NUMBER  22900)
-set(HYPRE_DATE    2023/06/22)
+set(HYPRE_VERSION 2.32.0)
+set(HYPRE_NUMBER  23200)
+set(HYPRE_DATE    2024/10/08)
 set(HYPRE_TIME    00:00:00)
 set(HYPRE_BUGS    https://github.com/hypre-space/hypre/issues)
 set(HYPRE_SRCDIR  "${PROJECT_SOURCE_DIR}")
@@ -23,6 +23,9 @@ set(PROJECT_NAME HYPRE)
 project(${PROJECT_NAME}
   VERSION ${HYPRE_VERSION}
   LANGUAGES C)
+
+# We use C99 by default, but users are free to specify any newer standard version
+set(CMAKE_C_STANDARD 99)
 
 if (${HYPRE_SOURCE_DIR} STREQUAL ${HYPRE_BINARY_DIR})
   message(FATAL_ERROR "In-place build not allowed! Please use a separate build directory. See the Users Manual or INSTALL file for details.")
@@ -629,6 +632,30 @@ if (HYPRE_USING_UMPIRE)
   target_include_directories(${PROJECT_NAME} PUBLIC ${TPL_UMPIRE_INCLUDE_DIRS})
 endif ()
 
+# Set MPI compile flags
+if (NOT HYPRE_SEQUENTIAL)
+  find_program(MPIEXEC_EXECUTABLE NAMES mpiexec mpirun)
+  find_package(MPI REQUIRED)
+  target_link_libraries(${PROJECT_NAME} PUBLIC MPI::MPI_C)
+  set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} MPI::MPI_C)
+
+  # Check if MPI supports the MPI_Comm_f2c function
+  include(CheckCSourceCompiles)
+  check_c_source_compiles("
+    #include <mpi.h>
+    int main() {
+      MPI_Comm c = MPI_Comm_f2c(0);
+      return 0;
+    }
+  " HYPRE_HAVE_MPI_COMM_F2C)
+endif (NOT HYPRE_SEQUENTIAL)
+
+# Set OpenMP compile flags
+if (HYPRE_USING_OPENMP)
+  find_package(OpenMP REQUIRED)
+  target_link_libraries(${PROJECT_NAME} PUBLIC OpenMP::OpenMP_C)
+endif (HYPRE_USING_OPENMP)
+
 # Configure a header file to pass CMake settings to the source code
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/config/HYPRE_config.h.cmake.in"
@@ -636,7 +663,7 @@ configure_file(
   )
 
 # Headers and sources: remaining subdirectories
-set(HYPRE_DIRS utilities multivector krylov seq_mv parcsr_mv parcsr_block_mv distributed_matrix IJ_mv matrix_matrix distributed_ls parcsr_ls struct_mv struct_ls sstruct_mv sstruct_ls)
+set(HYPRE_DIRS utilities multivector krylov seq_mv seq_block_mv parcsr_mv parcsr_block_mv distributed_matrix IJ_mv matrix_matrix distributed_ls parcsr_ls struct_mv struct_ls sstruct_mv sstruct_ls)
 foreach (DIR IN LISTS HYPRE_DIRS)
   add_subdirectory(${DIR})
   target_include_directories(${PROJECT_NAME} PUBLIC
@@ -659,19 +686,6 @@ endif ()
 if (HYPRE_USING_SYCL)
   set_source_files_properties(${HYPRE_GPU_SOURCES} PROPERTIES LANGUAGE CXX)
 endif ()
-
-# Set MPI compile flags
-if (NOT HYPRE_SEQUENTIAL)
-  find_program(MPIEXEC_EXECUTABLE NAMES mpiexec mpirun)
-  find_package(MPI REQUIRED)
-  target_link_libraries(${PROJECT_NAME} PUBLIC MPI::MPI_C)
-endif (NOT HYPRE_SEQUENTIAL)
-
-# Set OpenMP compile flags
-if (HYPRE_USING_OPENMP)
-  find_package(OpenMP REQUIRED)
-  target_link_libraries(${PROJECT_NAME} PUBLIC OpenMP::OpenMP_C)
-endif (HYPRE_USING_OPENMP)
 
 if (MSVC)
   target_compile_definitions(${PROJECT_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
